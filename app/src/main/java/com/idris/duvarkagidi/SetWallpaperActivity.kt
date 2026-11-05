@@ -5,6 +5,14 @@ import android.app.WallpaperManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Rect
+import android.content.res.Configuration
+import android.hardware.display.DisplayManager
+import android.util.DisplayMetrics
+import android.view.Display
 import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
@@ -59,7 +67,7 @@ class SetWallpaperActivity : Activity() {
         if (!wm.isWallpaperSupported || !wm.isSetWallpaperAllowed) {
             throw UnsupportedOperationException()
         }
-        val bmp = fitToScreen(decode(ctx, uri), wm)
+        val bmp = fitToScreen(ctx, decode(ctx, uri))
         return try {
             wm.setBitmap(bmp, null, true, WallpaperManager.FLAG_SYSTEM or WallpaperManager.FLAG_LOCK)
             true
@@ -82,23 +90,31 @@ class SetWallpaperActivity : Activity() {
         }
     }
 
-    /** Görseli ekran oranına göre ortadan kırpar. */
-    private fun fitToScreen(src: Bitmap, wm: WallpaperManager): Bitmap {
-        val tw = wm.desiredMinimumWidth
-        val th = wm.desiredMinimumHeight
-        if (tw <= 0 || th <= 0) return src
-        val target = tw.toFloat() / th
-        val cur = src.width.toFloat() / src.height
-        return when {
-            cur > target -> {
-                val w = (src.height * target).toInt()
-                Bitmap.createBitmap(src, (src.width - w) / 2, 0, w, src.height)
-            }
-            cur < target -> {
-                val h = (src.width / target).toInt()
-                Bitmap.createBitmap(src, 0, (src.height - h) / 2, src.width, h)
-            }
-            else -> src
-        }
+    /** Görseli kırpmadan, ekrana tamamen sığacak şekilde ortalar (kalan alan siyah). */
+    private fun fitToScreen(ctx: Context, src: Bitmap): Bitmap {
+        val dm = DisplayMetrics()
+        @Suppress("DEPRECATION")
+        (ctx.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager)
+            .getDisplay(Display.DEFAULT_DISPLAY).getRealMetrics(dm)
+        val a = minOf(dm.widthPixels, dm.heightPixels)
+        val b = maxOf(dm.widthPixels, dm.heightPixels)
+        val isTv = (ctx.resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) ==
+            Configuration.UI_MODE_TYPE_TELEVISION
+        // Telefon: dikey, TV: yatay
+        val tw = if (isTv) b else a
+        val th = if (isTv) a else b
+
+        val scale = minOf(tw.toFloat() / src.width, th.toFloat() / src.height)
+        val w = (src.width * scale).toInt().coerceAtLeast(1)
+        val h = (src.height * scale).toInt().coerceAtLeast(1)
+
+        val out = Bitmap.createBitmap(tw, th, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        canvas.drawColor(Color.BLACK)
+        val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+        val left = (tw - w) / 2
+        val top = (th - h) / 2
+        canvas.drawBitmap(src, null, Rect(left, top, left + w, top + h), paint)
+        return out
     }
 }
